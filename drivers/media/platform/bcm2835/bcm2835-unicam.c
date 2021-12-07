@@ -2763,7 +2763,7 @@ static void unicam_release(struct kref *kref)
 	media_device_cleanup(&unicam->mdev);
 
 	if (unicam->sensor_state)
-		v4l2_subdev_free_state(unicam->sensor_state);
+		__v4l2_subdev_state_free(unicam->sensor_state);
 
 	kfree(unicam);
 }
@@ -3104,7 +3104,7 @@ static int unicam_async_complete(struct v4l2_async_notifier *notifier)
 
 	unicam->v4l2_dev.notify = unicam_notify;
 
-	unicam->sensor_state = v4l2_subdev_alloc_state(unicam->sensor);
+	unicam->sensor_state = __v4l2_subdev_state_alloc(unicam->sensor);
 	if (!unicam->sensor_state)
 		return -ENOMEM;
 
