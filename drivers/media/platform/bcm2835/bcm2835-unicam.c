@@ -3101,10 +3101,13 @@ static int unicam_async_complete(struct v4l2_async_notifier *notifier)
 	struct unicam_device *unicam = to_unicam_device(notifier->v4l2_dev);
 	unsigned int i, source_pads = 0;
 	int ret;
+	static struct lock_class_key key;
 
 	unicam->v4l2_dev.notify = unicam_notify;
 
-	unicam->sensor_state = __v4l2_subdev_state_alloc(unicam->sensor);
+	unicam->sensor_state = __v4l2_subdev_state_alloc(unicam->sensor,
+							 "unicam:state->lock",
+							 &key);
 	if (!unicam->sensor_state)
 		return -ENOMEM;
 
