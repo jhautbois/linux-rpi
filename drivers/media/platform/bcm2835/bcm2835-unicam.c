@@ -438,8 +438,8 @@ static const struct unicam_fmt formats[] = {
 	},
 	/* Embedded data format */
 	{
-		.fourcc		= V4L2_META_FMT_SENSOR_DATA,
-		.code		= MEDIA_BUS_FMT_SENSOR_DATA,
+		.fourcc		= V4L2_META_FMT_8,
+		.code		= MEDIA_BUS_FMT_METADATA_8,
 		.depth		= 8,
 		.metadata_fmt	= 1,
 	}
@@ -777,7 +777,7 @@ static int unicam_reset_format(struct unicam_node *node)
 		unicam_calc_format_size_bpl(dev, node->fmt, &node->v_fmt);
 	} else {
 		node->v_fmt.type = V4L2_BUF_TYPE_META_CAPTURE;
-		node->v_fmt.fmt.meta.dataformat = V4L2_META_FMT_SENSOR_DATA;
+		node->v_fmt.fmt.meta.dataformat = V4L2_META_FMT_8;
 		if (dev->sensor_embedded_data) {
 			node->v_fmt.fmt.meta.buffersize =
 					mbus_fmt.width * mbus_fmt.height;
@@ -1365,7 +1365,7 @@ static int unicam_enum_fmt_meta_cap(struct file *file, void *priv,
 
 		code = mbus_code.code;
 	} else {
-		code = MEDIA_BUS_FMT_SENSOR_DATA;
+		code = MEDIA_BUS_FMT_METADATA_8;
 	}
 
 	fmt = find_format_by_code(code);
@@ -1979,7 +1979,7 @@ static int unicam_mc_try_fmt_meta_cap(struct file *file, void *priv,
 	if (node->pad_id != METADATA_PAD)
 		return -EINVAL;
 
-	f->fmt.meta.dataformat = V4L2_META_FMT_SENSOR_DATA;
+	f->fmt.meta.dataformat = V4L2_META_FMT_8;
 
 	return 0;
 }
@@ -2088,11 +2088,11 @@ static int unicam_mc_video_link_validate(struct media_link *link)
 
 		if (source_fmt.format.width != meta_fmt->buffersize ||
 		    source_fmt.format.height != 1 ||
-		    source_fmt.format.code != MEDIA_BUS_FMT_SENSOR_DATA) {
+		    source_fmt.format.code != MEDIA_BUS_FMT_METADATA_8) {
 			unicam_err(unicam,
 				   "Wrong metadata width/height/code %ux%u %08x (remote pad set to %ux%u %08x)\n",
 				   meta_fmt->buffersize, 1,
-				   MEDIA_BUS_FMT_SENSOR_DATA,
+				   MEDIA_BUS_FMT_METADATA_8,
 				   source_fmt.format.width,
 				   source_fmt.format.height,
 				   source_fmt.format.code);
@@ -2830,7 +2830,7 @@ static int unicam_set_default_format(struct unicam_device *unicam,
 						: fmt->repacked_fourcc;
 	} else {
 		/* Fix this node format as embedded data. */
-		fmt = find_format_by_code(MEDIA_BUS_FMT_SENSOR_DATA);
+		fmt = find_format_by_code(MEDIA_BUS_FMT_METADATA_8);
 		node->v_fmt.fmt.meta.dataformat = fmt->fourcc;
 	}
 
@@ -2861,7 +2861,7 @@ static void unicam_mc_set_default_format(struct unicam_node *node, int pad_id)
 		const struct unicam_fmt *fmt;
 
 		/* Fix this node format as embedded data. */
-		fmt = find_format_by_code(MEDIA_BUS_FMT_SENSOR_DATA);
+		fmt = find_format_by_code(MEDIA_BUS_FMT_METADATA_8);
 		node->v_fmt.fmt.meta.dataformat = fmt->fourcc;
 		node->fmt = fmt;
 
