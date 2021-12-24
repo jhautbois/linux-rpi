@@ -1705,3 +1705,4 @@ MODULE_AUTHOR("Dave Stevenson");
 MODULE_DESCRIPTION("VideoCore CMA Shared Memory Driver");
 MODULE_LICENSE("GPL v2");
 MODULE_ALIAS("platform:vcsm-cma");
+MODULE_IMPORT_NS(DMA_BUF);
