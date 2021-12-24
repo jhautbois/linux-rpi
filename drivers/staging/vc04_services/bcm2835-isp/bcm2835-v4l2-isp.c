@@ -1807,3 +1807,4 @@ MODULE_AUTHOR("Naushir Patuck <naush@raspberrypi.com>");
 MODULE_LICENSE("GPL");
 MODULE_VERSION("1.0");
 MODULE_ALIAS("platform:bcm2835-isp");
+MODULE_IMPORT_NS(DMA_BUF);
