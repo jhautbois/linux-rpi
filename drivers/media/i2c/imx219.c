@@ -118,6 +118,16 @@
 #define IMX219_PIXEL_ARRAY_WIDTH	3280U
 #define IMX219_PIXEL_ARRAY_HEIGHT	2464U
 
+/* Embedded metadata stream structure */
+#define IMX219_EMBEDDED_LINE_WIDTH 16384
+#define IMX219_NUM_EMBEDDED_LINES 1
+
+enum pad_types {
+	IMAGE_PAD,
+	METADATA_PAD,
+	NUM_PADS
+};
+
 struct imx219_reg {
 	u16 address;
 	u8 val;
@@ -429,7 +439,7 @@ static const char * const imx219_supply_name[] = {
  * - v flip
  * - h&v flips
  */
-static const u32 codes[] = {
+static const u32 imx219_mbus_formats[] = {
 	MEDIA_BUS_FMT_SRGGB10_1X10,
 	MEDIA_BUS_FMT_SGRBG10_1X10,
 	MEDIA_BUS_FMT_SGBRG10_1X10,
@@ -655,62 +665,17 @@ static u32 imx219_get_format_code(struct imx219 *imx219, u32 code)
 
 	lockdep_assert_held(&imx219->mutex);
 
-	for (i = 0; i < ARRAY_SIZE(codes); i++)
-		if (codes[i] == code)
+	for (i = 0; i < ARRAY_SIZE(imx219_mbus_formats); i++)
+		if (imx219_mbus_formats[i] == code)
 			break;
 
-	if (i >= ARRAY_SIZE(codes))
+	if (i >= ARRAY_SIZE(imx219_mbus_formats))
 		i = 0;
 
 	i = (i & ~3) | (imx219->vflip->val ? 2 : 0) |
 	    (imx219->hflip->val ? 1 : 0);
 
-	return codes[i];
-}
-
-static void imx219_set_default_format(struct imx219 *imx219)
-{
-	struct v4l2_mbus_framefmt *fmt;
-
-	fmt = &imx219->fmt;
-	fmt->code = MEDIA_BUS_FMT_SRGGB10_1X10;
-	fmt->colorspace = V4L2_COLORSPACE_SRGB;
-	fmt->ycbcr_enc = V4L2_MAP_YCBCR_ENC_DEFAULT(fmt->colorspace);
-	fmt->quantization = V4L2_MAP_QUANTIZATION_DEFAULT(true,
-							  fmt->colorspace,
-							  fmt->ycbcr_enc);
-	fmt->xfer_func = V4L2_MAP_XFER_FUNC_DEFAULT(fmt->colorspace);
-	fmt->width = supported_modes[0].width;
-	fmt->height = supported_modes[0].height;
-	fmt->field = V4L2_FIELD_NONE;
-}
-
-static int imx219_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
-{
-	struct imx219 *imx219 = to_imx219(sd);
-	struct v4l2_mbus_framefmt *try_fmt =
-		v4l2_subdev_get_try_format(sd, fh->state, 0);
-	struct v4l2_rect *try_crop;
-
-	mutex_lock(&imx219->mutex);
-
-	/* Initialize try_fmt */
-	try_fmt->width = supported_modes[0].width;
-	try_fmt->height = supported_modes[0].height;
-	try_fmt->code = imx219_get_format_code(imx219,
-					       MEDIA_BUS_FMT_SRGGB10_1X10);
-	try_fmt->field = V4L2_FIELD_NONE;
-
-	/* Initialize try_crop rectangle. */
-	try_crop = v4l2_subdev_get_try_crop(sd, fh->state, 0);
-	try_crop->top = IMX219_PIXEL_ARRAY_TOP;
-	try_crop->left = IMX219_PIXEL_ARRAY_LEFT;
-	try_crop->width = IMX219_PIXEL_ARRAY_WIDTH;
-	try_crop->height = IMX219_PIXEL_ARRAY_HEIGHT;
-
-	mutex_unlock(&imx219->mutex);
-
-	return 0;
+	return imx219_mbus_formats[i];
 }
 
 static int imx219_set_ctrl(struct v4l2_ctrl *ctrl)
@@ -802,18 +767,103 @@ static const struct v4l2_ctrl_ops imx219_ctrl_ops = {
 	.s_ctrl = imx219_set_ctrl,
 };
 
+static void imx219_init_formats(struct v4l2_subdev_state *state)
+{
+	struct v4l2_mbus_framefmt *format;
+
+	format = v4l2_state_get_stream_format(state, 0, 0);
+	format->code = imx219_mbus_formats[0];
+	format->width = supported_modes[0].width;
+	format->height = supported_modes[0].height;
+	format->field = V4L2_FIELD_NONE;
+	format->colorspace = V4L2_COLORSPACE_RAW;
+
+	if (state->routing.routes[1].flags & V4L2_SUBDEV_ROUTE_FL_ACTIVE) {
+		format = v4l2_state_get_stream_format(state, 0, 1);
+		format->code = MEDIA_BUS_FMT_METADATA_8;
+		format->width = IMX219_EMBEDDED_LINE_WIDTH;
+		format->height = 1;
+		format->field = V4L2_FIELD_NONE;
+		format->colorspace = V4L2_COLORSPACE_DEFAULT;
+	}
+}
+
+static int _imx219_set_routing(struct v4l2_subdev *sd,
+			       struct v4l2_subdev_state *state)
+{
+	struct v4l2_subdev_route routes[] = {
+		{
+			.source_pad = 0,
+			.source_stream = 0,
+			.flags = V4L2_SUBDEV_ROUTE_FL_IMMUTABLE |
+				 V4L2_SUBDEV_ROUTE_FL_SOURCE |
+				 V4L2_SUBDEV_ROUTE_FL_ACTIVE,
+		},
+		{
+			.source_pad = 0,
+			.source_stream = 1,
+			.flags = V4L2_SUBDEV_ROUTE_FL_SOURCE|
+				 V4L2_SUBDEV_ROUTE_FL_ACTIVE,
+		}
+	};
+
+	struct v4l2_subdev_krouting routing = {
+		.num_routes = ARRAY_SIZE(routes),
+		.routes = routes,
+	};
+
+	int ret;
+
+	ret = v4l2_subdev_set_routing(sd, state, &routing);
+	if (ret)
+		return ret;
+
+	imx219_init_formats(state);
+
+	return 0;
+}
+
+static int imx219_set_routing(struct v4l2_subdev *sd,
+			      struct v4l2_subdev_state *state,
+			      enum v4l2_subdev_format_whence which,
+			      struct v4l2_subdev_krouting *routing)
+{
+	int ret;
+
+	if (routing->num_routes == 0 || routing->num_routes > 2)
+		return -EINVAL;
+
+	v4l2_subdev_lock_state(state);
+
+	ret = _imx219_set_routing(sd, state);
+
+	v4l2_subdev_unlock_state(state);
+
+	return ret;
+}
+
+static int imx219_init_cfg(struct v4l2_subdev *sd,
+			   struct v4l2_subdev_state *state)
+{
+	int ret;
+
+	v4l2_subdev_lock_state(state);
+
+	ret = _imx219_set_routing(sd, state);
+
+	v4l2_subdev_unlock_state(state);
+
+	return ret;
+}
+
 static int imx219_enum_mbus_code(struct v4l2_subdev *sd,
 				 struct v4l2_subdev_state *sd_state,
 				 struct v4l2_subdev_mbus_code_enum *code)
 {
-	struct imx219 *imx219 = to_imx219(sd);
-
-	if (code->index >= (ARRAY_SIZE(codes) / 4))
+	if (code->index >= ARRAY_SIZE(imx219_mbus_formats))
 		return -EINVAL;
 
-	mutex_lock(&imx219->mutex);
-	code->code = imx219_get_format_code(imx219, codes[code->index * 4]);
-	mutex_unlock(&imx219->mutex);
+	code->code = imx219_mbus_formats[code->index];
 
 	return 0;
 }
@@ -822,78 +872,43 @@ static int imx219_enum_frame_size(struct v4l2_subdev *sd,
 				  struct v4l2_subdev_state *sd_state,
 				  struct v4l2_subdev_frame_size_enum *fse)
 {
-	struct imx219 *imx219 = to_imx219(sd);
-	u32 code;
+	unsigned int i;
 
-	if (fse->index >= ARRAY_SIZE(supported_modes))
-		return -EINVAL;
+	if (fse->stream == 0) {
+		for (i = 0; i < ARRAY_SIZE(imx219_mbus_formats); ++i) {
+			if (imx219_mbus_formats[i] == fse->code)
+				break;
+		}
 
-	mutex_lock(&imx219->mutex);
-	code = imx219_get_format_code(imx219, fse->code);
-	mutex_unlock(&imx219->mutex);
-	if (fse->code != code)
-		return -EINVAL;
+		if (i == ARRAY_SIZE(imx219_mbus_formats))
+			return -EINVAL;
 
-	fse->min_width = supported_modes[fse->index].width;
-	fse->max_width = fse->min_width;
-	fse->min_height = supported_modes[fse->index].height;
-	fse->max_height = fse->min_height;
+		if (fse->index >= ARRAY_SIZE(supported_modes))
+			return -EINVAL;
 
-	return 0;
-}
-
-static void imx219_reset_colorspace(struct v4l2_mbus_framefmt *fmt)
-{
-	fmt->colorspace = V4L2_COLORSPACE_SRGB;
-	fmt->ycbcr_enc = V4L2_MAP_YCBCR_ENC_DEFAULT(fmt->colorspace);
-	fmt->quantization = V4L2_MAP_QUANTIZATION_DEFAULT(true,
-							  fmt->colorspace,
-							  fmt->ycbcr_enc);
-	fmt->xfer_func = V4L2_MAP_XFER_FUNC_DEFAULT(fmt->colorspace);
-}
-
-static void imx219_update_pad_format(struct imx219 *imx219,
-				     const struct imx219_mode *mode,
-				     struct v4l2_subdev_format *fmt)
-{
-	fmt->format.width = mode->width;
-	fmt->format.height = mode->height;
-	fmt->format.field = V4L2_FIELD_NONE;
-	imx219_reset_colorspace(&fmt->format);
-}
-
-static int __imx219_get_pad_format(struct imx219 *imx219,
-				   struct v4l2_subdev_state *sd_state,
-				   struct v4l2_subdev_format *fmt)
-{
-	if (fmt->which == V4L2_SUBDEV_FORMAT_TRY) {
-		struct v4l2_mbus_framefmt *try_fmt =
-			v4l2_subdev_get_try_format(&imx219->sd, sd_state,
-						   fmt->pad);
-		/* update the code which could change due to vflip or hflip: */
-		try_fmt->code = imx219_get_format_code(imx219, try_fmt->code);
-		fmt->format = *try_fmt;
+		fse->min_width  = supported_modes[fse->index].width;
+		fse->max_width  = fse->min_width;
+		fse->max_height = supported_modes[fse->index].height;
+		fse->min_height = fse->max_height;
 	} else {
-		imx219_update_pad_format(imx219, imx219->mode, fmt);
-		fmt->format.code = imx219_get_format_code(imx219,
-							  imx219->fmt.code);
+		if (fse->code != MEDIA_BUS_FMT_METADATA_8)
+			return -EINVAL;
+
+		fse->min_width = IMX219_EMBEDDED_LINE_WIDTH;
+		fse->max_width = fse->min_width;
+		fse->min_height = IMX219_NUM_EMBEDDED_LINES;
+		fse->max_height = fse->min_height;
 	}
 
 	return 0;
 }
 
-static int imx219_get_pad_format(struct v4l2_subdev *sd,
-				 struct v4l2_subdev_state *sd_state,
-				 struct v4l2_subdev_format *fmt)
+static void imx219_update_metadata_pad_format(struct v4l2_subdev_format *fmt)
 {
-	struct imx219 *imx219 = to_imx219(sd);
-	int ret;
-
-	mutex_lock(&imx219->mutex);
-	ret = __imx219_get_pad_format(imx219, sd_state, fmt);
-	mutex_unlock(&imx219->mutex);
-
-	return ret;
+	fmt->format.width = IMX219_EMBEDDED_LINE_WIDTH;
+	fmt->format.height = IMX219_NUM_EMBEDDED_LINES;
+	fmt->format.code = MEDIA_BUS_FMT_METADATA_8;
+	fmt->format.field = V4L2_FIELD_NONE;
 }
 
 static int imx219_set_pad_format(struct v4l2_subdev *sd,
@@ -901,82 +916,99 @@ static int imx219_set_pad_format(struct v4l2_subdev *sd,
 				 struct v4l2_subdev_format *fmt)
 {
 	struct imx219 *imx219 = to_imx219(sd);
+	struct i2c_client *client = v4l2_get_subdevdata(&imx219->sd);
 	const struct imx219_mode *mode;
-	struct v4l2_mbus_framefmt *framefmt;
-	int exposure_max, exposure_def, hblank;
+	struct v4l2_mbus_framefmt *format;
+	u32 code;
 	unsigned int i;
+	int ret = 0;
+	int exposure_max, exposure_def, hblank;
 
-	mutex_lock(&imx219->mutex);
+	if (fmt->pad != 0) {
+		dev_err(&client->dev, "%s Could not get pad %d\n", __func__,
+			fmt->pad);
+		return -EINVAL;
+	}
 
-	for (i = 0; i < ARRAY_SIZE(codes); i++)
-		if (codes[i] == fmt->format.code)
+	if (fmt->stream == 1) {
+		/* Only one embedded data mode is supported */
+		imx219_update_metadata_pad_format(fmt);
+		return 0;
+	}
+
+	if (fmt->stream != 0)
+		return -EINVAL;
+
+	/*
+	 * Validate the media bus code, defaulting to the first one if the
+	 * requested code isn't supported.
+	 */
+	for (i = 0; i < ARRAY_SIZE(imx219_mbus_formats); ++i) {
+		if (imx219_mbus_formats[i] == fmt->format.code) {
+			code = fmt->format.code;
 			break;
-	if (i >= ARRAY_SIZE(codes))
-		i = 0;
+		}
+	}
+
+	if (i == ARRAY_SIZE(imx219_mbus_formats))
+		code = imx219_mbus_formats[0];
 
 	/* Bayer order varies with flips */
-	fmt->format.code = imx219_get_format_code(imx219, codes[i]);
+	fmt->format.code = imx219_get_format_code(imx219, imx219_mbus_formats[i]);
 
 	mode = v4l2_find_nearest_size(supported_modes,
 				      ARRAY_SIZE(supported_modes),
 				      width, height,
-				      fmt->format.width, fmt->format.height);
-	imx219_update_pad_format(imx219, mode, fmt);
-	if (fmt->which == V4L2_SUBDEV_FORMAT_TRY) {
-		framefmt = v4l2_subdev_get_try_format(sd, sd_state, fmt->pad);
-		*framefmt = fmt->format;
-	} else if (imx219->mode != mode ||
-		   imx219->fmt.code != fmt->format.code) {
-		imx219->fmt = fmt->format;
-		imx219->mode = mode;
-		/* Update limits and set FPS to default */
-		__v4l2_ctrl_modify_range(imx219->vblank, IMX219_VBLANK_MIN,
-					 IMX219_VTS_MAX - mode->height, 1,
-					 mode->vts_def - mode->height);
-		__v4l2_ctrl_s_ctrl(imx219->vblank,
-				   mode->vts_def - mode->height);
-		/* Update max exposure while meeting expected vblanking */
-		exposure_max = mode->vts_def - 4;
-		exposure_def = (exposure_max < IMX219_EXPOSURE_DEFAULT) ?
+				      fmt->format.width,
+				      fmt->format.height);
+
+	v4l2_subdev_lock_state(sd_state);
+
+	/* Update the stored format and return it. */
+	format = v4l2_state_get_stream_format(sd_state, fmt->pad, fmt->stream);
+
+	if (fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE && imx219->streaming) {
+		ret = -EBUSY;
+		goto done;
+	}
+
+	format->code = code;
+	format->width = mode->width;
+	format->height = mode->height;
+
+	fmt->format = *format;
+
+	/* Update limits and set FPS to default */
+	__v4l2_ctrl_modify_range(imx219->vblank,
+				 IMX219_VBLANK_MIN,
+				 IMX219_VTS_MAX - mode->height,
+				 1,
+				 mode->vts_def - mode->height);
+	__v4l2_ctrl_s_ctrl(imx219->vblank, mode->vts_def - mode->height);
+	/*
+	 * Update max exposure while meeting
+	 * expected vblanking
+	 */
+	exposure_max = mode->vts_def - 4;
+	exposure_def = (exposure_max < IMX219_EXPOSURE_DEFAULT) ?
 			exposure_max : IMX219_EXPOSURE_DEFAULT;
-		__v4l2_ctrl_modify_range(imx219->exposure,
-					 imx219->exposure->minimum,
-					 exposure_max, imx219->exposure->step,
-					 exposure_def);
-		/*
-		 * Currently PPL is fixed to IMX219_PPL_DEFAULT, so hblank
-		 * depends on mode->width only, and is not changeble in any
-		 * way other than changing the mode.
-		 */
-		hblank = IMX219_PPL_DEFAULT - mode->width;
-		__v4l2_ctrl_modify_range(imx219->hblank, hblank, hblank, 1,
-					 hblank);
-	}
+	__v4l2_ctrl_modify_range(imx219->exposure,
+				 imx219->exposure->minimum,
+				 exposure_max,
+				 imx219->exposure->step,
+				 exposure_def);
+	/*
+	 * Currently PPL is fixed to IMX219_PPL_DEFAULT, so
+	 * hblank depends on mode->width only, and is not
+	 * changeble in any way other than changing the mode.
+	 */
+	hblank = IMX219_PPL_DEFAULT - mode->width;
+	__v4l2_ctrl_modify_range(imx219->hblank, hblank, hblank, 1, hblank);
 
-	mutex_unlock(&imx219->mutex);
+done:
+	v4l2_subdev_unlock_state(sd_state);
 
-	return 0;
-}
-
-static int imx219_set_framefmt(struct imx219 *imx219)
-{
-	switch (imx219->fmt.code) {
-	case MEDIA_BUS_FMT_SRGGB8_1X8:
-	case MEDIA_BUS_FMT_SGRBG8_1X8:
-	case MEDIA_BUS_FMT_SGBRG8_1X8:
-	case MEDIA_BUS_FMT_SBGGR8_1X8:
-		return imx219_write_regs(imx219, raw8_framefmt_regs,
-					ARRAY_SIZE(raw8_framefmt_regs));
-
-	case MEDIA_BUS_FMT_SRGGB10_1X10:
-	case MEDIA_BUS_FMT_SGRBG10_1X10:
-	case MEDIA_BUS_FMT_SGBRG10_1X10:
-	case MEDIA_BUS_FMT_SBGGR10_1X10:
-		return imx219_write_regs(imx219, raw10_framefmt_regs,
-					ARRAY_SIZE(raw10_framefmt_regs));
-	}
-
-	return -EINVAL;
+	return ret;
 }
 
 static const struct v4l2_rect *
@@ -1037,22 +1069,17 @@ static int imx219_start_streaming(struct imx219 *imx219)
 	const struct imx219_reg_list *reg_list;
 	int ret;
 
-	ret = pm_runtime_resume_and_get(&client->dev);
-	if (ret < 0)
+	ret = pm_runtime_get_sync(&client->dev);
+	if (ret < 0) {
+		pm_runtime_put_noidle(&client->dev);
 		return ret;
+	}
 
 	/* Apply default values of current mode */
 	reg_list = &imx219->mode->reg_list;
 	ret = imx219_write_regs(imx219, reg_list->regs, reg_list->num_of_regs);
 	if (ret) {
 		dev_err(&client->dev, "%s failed to set mode\n", __func__);
-		goto err_rpm_put;
-	}
-
-	ret = imx219_set_framefmt(imx219);
-	if (ret) {
-		dev_err(&client->dev, "%s failed to set frame format: %d\n",
-			__func__, ret);
 		goto err_rpm_put;
 	}
 
@@ -1133,21 +1160,22 @@ err_unlock:
 /* Power/clock management functions */
 static int imx219_power_on(struct device *dev)
 {
-	struct v4l2_subdev *sd = dev_get_drvdata(dev);
+	struct i2c_client *client = to_i2c_client(dev);
+	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 	struct imx219 *imx219 = to_imx219(sd);
 	int ret;
 
 	ret = regulator_bulk_enable(IMX219_NUM_SUPPLIES,
 				    imx219->supplies);
 	if (ret) {
-		dev_err(dev, "%s: failed to enable regulators\n",
+		dev_err(&client->dev, "%s: failed to enable regulators\n",
 			__func__);
 		return ret;
 	}
 
 	ret = clk_prepare_enable(imx219->xclk);
 	if (ret) {
-		dev_err(dev, "%s: failed to enable clock\n",
+		dev_err(&client->dev, "%s: failed to enable clock\n",
 			__func__);
 		goto reg_off;
 	}
@@ -1166,7 +1194,8 @@ reg_off:
 
 static int imx219_power_off(struct device *dev)
 {
-	struct v4l2_subdev *sd = dev_get_drvdata(dev);
+	struct i2c_client *client = to_i2c_client(dev);
+	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 	struct imx219 *imx219 = to_imx219(sd);
 
 	gpiod_set_value_cansleep(imx219->reset_gpio, 0);
@@ -1178,7 +1207,8 @@ static int imx219_power_off(struct device *dev)
 
 static int __maybe_unused imx219_suspend(struct device *dev)
 {
-	struct v4l2_subdev *sd = dev_get_drvdata(dev);
+	struct i2c_client *client = to_i2c_client(dev);
+	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 	struct imx219 *imx219 = to_imx219(sd);
 
 	if (imx219->streaming)
@@ -1189,7 +1219,8 @@ static int __maybe_unused imx219_suspend(struct device *dev)
 
 static int __maybe_unused imx219_resume(struct device *dev)
 {
-	struct v4l2_subdev *sd = dev_get_drvdata(dev);
+	struct i2c_client *client = to_i2c_client(dev);
+	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 	struct imx219 *imx219 = to_imx219(sd);
 	int ret;
 
@@ -1255,21 +1286,19 @@ static const struct v4l2_subdev_video_ops imx219_video_ops = {
 };
 
 static const struct v4l2_subdev_pad_ops imx219_pad_ops = {
-	.enum_mbus_code = imx219_enum_mbus_code,
-	.get_fmt = imx219_get_pad_format,
-	.set_fmt = imx219_set_pad_format,
-	.get_selection = imx219_get_selection,
-	.enum_frame_size = imx219_enum_frame_size,
+	.init_cfg		= imx219_init_cfg,
+	.enum_mbus_code 	= imx219_enum_mbus_code,
+	.get_fmt		= v4l2_subdev_get_fmt,
+	.set_fmt		= imx219_set_pad_format,
+	.get_selection 		= imx219_get_selection,
+	.set_routing		= imx219_set_routing,
+	.enum_frame_size	= imx219_enum_frame_size,
 };
 
 static const struct v4l2_subdev_ops imx219_subdev_ops = {
 	.core = &imx219_core_ops,
 	.video = &imx219_video_ops,
 	.pad = &imx219_pad_ops,
-};
-
-static const struct v4l2_subdev_internal_ops imx219_internal_ops = {
-	.open = imx219_open,
 };
 
 /* Initialize control handlers */
@@ -1446,6 +1475,7 @@ error_out:
 static int imx219_probe(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
+	struct v4l2_subdev *sd;
 	struct imx219 *imx219;
 	int ret;
 
@@ -1453,7 +1483,8 @@ static int imx219_probe(struct i2c_client *client)
 	if (!imx219)
 		return -ENOMEM;
 
-	v4l2_i2c_subdev_init(&imx219->sd, client, &imx219_subdev_ops);
+	sd = &imx219->sd;
+	v4l2_i2c_subdev_init(sd, client, &imx219_subdev_ops);
 
 	/* Check the hardware configuration in device tree */
 	if (imx219_check_hwcfg(dev))
@@ -1520,27 +1551,29 @@ static int imx219_probe(struct i2c_client *client)
 		goto error_power_off;
 
 	/* Initialize subdev */
-	imx219->sd.internal_ops = &imx219_internal_ops;
-	imx219->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE |
-			    V4L2_SUBDEV_FL_HAS_EVENTS;
-	imx219->sd.entity.function = MEDIA_ENT_F_CAM_SENSOR;
+	sd->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE |
+		     V4L2_SUBDEV_FL_HAS_EVENTS |
+		     V4L2_SUBDEV_FL_MULTIPLEXED;
 
-	/* Initialize source pad */
+	/* Initialize the media entity. */
 	imx219->pad.flags = MEDIA_PAD_FL_SOURCE;
-
-	/* Initialize default format */
-	imx219_set_default_format(imx219);
-
-	ret = media_entity_pads_init(&imx219->sd.entity, 1, &imx219->pad);
+	sd->entity.function = MEDIA_ENT_F_CAM_SENSOR;
+	ret = media_entity_pads_init(&sd->entity, 1, &imx219->pad);
 	if (ret) {
 		dev_err(dev, "failed to init entity pads: %d\n", ret);
 		goto error_handler_free;
 	}
 
-	ret = v4l2_async_register_subdev_sensor(&imx219->sd);
+	ret = v4l2_subdev_init_finalize(sd);
+	if (ret) {
+		dev_err(dev, "failed to finalize sensor init: %d\n", ret);
+		goto error_media_entity;
+	}
+
+	ret = v4l2_async_register_subdev_sensor(sd);
 	if (ret < 0) {
 		dev_err(dev, "failed to register sensor sub-device: %d\n", ret);
-		goto error_media_entity;
+		goto error_free_state;
 	}
 
 	/* Enable runtime PM and turn off the device */
@@ -1550,6 +1583,8 @@ static int imx219_probe(struct i2c_client *client)
 
 	return 0;
 
+error_free_state:
+	v4l2_subdev_cleanup(sd);
 error_media_entity:
 	media_entity_cleanup(&imx219->sd.entity);
 
@@ -1568,6 +1603,9 @@ static int imx219_remove(struct i2c_client *client)
 	struct imx219 *imx219 = to_imx219(sd);
 
 	v4l2_async_unregister_subdev(sd);
+
+	v4l2_subdev_cleanup(sd);
+
 	media_entity_cleanup(&sd->entity);
 	imx219_free_controls(imx219);
 
