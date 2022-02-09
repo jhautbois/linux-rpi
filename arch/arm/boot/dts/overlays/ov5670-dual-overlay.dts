@@ -1,0 +1,122 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Definitions for OV5670 camera module on VC I2C bus
+/dts-v1/;
+/plugin/;
+
+/{
+	compatible = "brcm,bcm2835";
+
+    fragment@0 {
+		target = <&i2c_csi_dsi>;
+		__overlay__ {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "okay";
+
+			ov5670_0: ov5670@36 {
+				compatible = "ovti,ov5670";
+				reg = <0x36>;
+				avdd-supply = <&cam0_reg>;
+				status = "okay";
+				port {
+					ov5670_0_ep: endpoint {
+						remote-endpoint = <&csi0_ep>;
+						clock-lanes = <0>;
+						data-lanes = <1 2>;
+						clock-noncontinuous;
+						link-frequencies =
+							/bits/ 64 <297000000>;
+					};
+				};
+			};
+		};
+	};
+
+	fragment@1 {
+		target = <&csi0>;
+		__overlay__ {
+			status = "okay";
+
+			port {
+				csi0_ep: endpoint {
+					remote-endpoint = <&ov5670_0_ep>;
+					data-lanes = <1 2>;
+				};
+			};
+		};
+	};
+
+	fragment@2 {
+		target = <&i2c0>;
+		__overlay__ {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "okay";
+
+			ov5670_1: ov5670@36 {
+				compatible = "ovti,ov5670";
+				reg = <0x36>;
+				avdd-supply = <&cam2_reg>;
+				status = "okay";
+				port {
+					ov5670_1_ep: endpoint {
+						remote-endpoint = <&csi1_ep>;
+						clock-lanes = <0>;
+						data-lanes = <1 2>;
+						clock-noncontinuous;
+						link-frequencies =
+							/bits/ 64 <297000000>;
+					};
+				};
+			};
+		};
+	};
+
+	fragment@3 {
+		target = <&csi1>;
+		__overlay__ {
+			status = "okay";
+
+			port {
+				csi1_ep: endpoint {
+					remote-endpoint = <&ov5670_1_ep>;
+					data-lanes = <1 2>;
+				};
+			};
+		};
+	};
+
+	fragment@4 {
+		target = <&i2c0if>;
+		__overlay__ {
+			status = "okay";
+		};
+	};
+
+	fragment@5 {
+		target = <&i2c0mux>;
+		__overlay__ {
+			status = "okay";
+		};
+	};
+
+	fragment@6 {
+		target = <&cam0_reg>;
+		__overlay__ {
+			status = "okay";
+			regulator-name = "ov5670_avdd";
+			regulator-min-microvolt = <2800000>;
+			regulator-max-microvolt = <2800000>;
+		};
+	};
+
+	fragment@7 {
+		target = <&cam2_reg>;
+		__overlay__ {
+			status = "okay";
+			regulator-name = "ov5670_avdd";
+			regulator-min-microvolt = <2800000>;
+			regulator-max-microvolt = <2800000>;
+		};
+	};
+};

@@ -1,0 +1,91 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Definitions for OV5670 camera module on VC I2C bus
+/dts-v1/;
+/plugin/;
+
+/{
+	compatible = "brcm,bcm2835";
+
+	fragment@0 {
+		target = <&i2c0>;
+		__overlay__ {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "okay";
+
+			ov5670: ov5670@36 {
+				compatible = "ovti,ov5670";
+				reg = <0x36>;
+				clocks = <&ov5670_clk>;
+				avdd-supply = <&cam0_reg>;
+				rotation = <0>;
+				orientation = <2>;
+				status = "okay";
+				port {
+					ov5670_0: endpoint {
+						remote-endpoint = <&csi0_ep>;
+						clock-lanes = <0>;
+						data-lanes = <1 2>;
+						clock-noncontinuous;
+						link-frequencies =
+							/bits/ 64 <297000000>;
+					};
+				};
+			};
+		};
+	};
+
+	fragment@1 {
+		target = <&csi0>;
+		__overlay__ {
+			status = "okay";
+
+			port {
+				csi0_ep: endpoint {
+					remote-endpoint = <&ov5670_0>;
+					data-lanes = <1 2>;
+				};
+			};
+		};
+	};
+
+	fragment@2 {
+		target = <&i2c0if>;
+		__overlay__ {
+			status = "okay";
+		};
+	};
+
+	fragment@3 {
+		target = <&i2c0mux>;
+		__overlay__ {
+			status = "okay";
+		};
+	};
+
+	fragment@4 {
+		target = <&cam0_reg>;
+		__overlay__ {
+			status = "okay";
+			regulator-name = "ov5670_avdd";
+			regulator-min-microvolt = <2800000>;
+			regulator-max-microvolt = <2800000>;
+		};
+	};
+
+	fragment@5 {
+		target-path = "/";
+		__overlay__ {
+			ov5670_clk: camera-clk {
+				compatible = "fixed-clock";
+				#clock-cells = <0>;
+				clock-frequency = <25000000>;
+			};
+		};
+	};
+
+	__overrides__ {
+		rotation = <&ov5670>,"rotation:0";
+		orientation = <&ov5670>,"orientation:0";
+	};
+};
