@@ -7,4 +7,11 @@
 		enable-active-high;
 		status = "disabled";
 	};
+
+	cam3_reg: cam3_reg {
+		compatible = "regulator-fixed";
+		regulator-name = "cam3-reg";
+		enable-active-high;
+		status = "disabled";
+	};
 };
