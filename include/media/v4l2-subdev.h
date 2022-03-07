@@ -1487,6 +1487,21 @@ v4l2_subdev_state_get_stream_format(struct v4l2_subdev_state *state,
 				    unsigned int pad, u32 stream);
 
 /**
+ * v4l2_subdev_state_get_stream_crop_rect() - Get pointer to a stream format
+ * @state: subdevice state
+ * @pad: pad id
+ * @stream: stream id
+ *
+ * This returns a pointer to &struct v4l2_rect for the given pad +
+ * stream in the subdev state.
+ *
+ * If the state does not contain the given pad + stream, NULL is returned.
+ */
+struct v4l2_rect *
+v4l2_subdev_state_get_stream_crop_rect(struct v4l2_subdev_state *state,
+				       unsigned int pad, u32 stream);
+
+/**
  * v4l2_subdev_routing_find_opposite_end() - Find the opposite stream
  * @routing: routing used to find the opposite side
  * @pad: pad id
