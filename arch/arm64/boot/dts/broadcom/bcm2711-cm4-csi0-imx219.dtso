@@ -25,6 +25,12 @@
 	};
 };
 
+&pwm {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pwm0_0_gpio12 &pwm0_1_gpio13>;
+	status = "okay";
+};
+
 &i2c0 {
 	status = "okay";
 };
