@@ -13,7 +13,8 @@ dtb-$(CONFIG_ARCH_BCM2835) += bcm2711-rpi-400.dtb \
 			      bcm2837-rpi-zero-2-w.dtb
 
 bcm2711-rpi-4-b-imx219-dtbs    := bcm2711-rpi-4-b.dtb    bcm2711-rpi-4-b-imx219.dtbo
-bcm2711-rpi-cm4-dtbs		:= bcm2711-rpi-cm4-io.dtb bcm2711-cm4-csi0-imx219.dtbo
+#bcm2711-rpi-cm4-dtbs		:= bcm2711-rpi-cm4-io.dtb bcm2711-cm4-csi0-imx219.dtbo
+bcm2711-rpi-cm4-dtbs		:= bcm2711-rpi-cm4-io.dtb bcm2711-cm4-csi0-imx708.dtbo
 dtb-$(CONFIG_ARCH_BCM2835) += bcm2711-rpi-4-b-imx219.dtb
 dtb-$(CONFIG_ARCH_BCM2835) += bcm2711-rpi-cm4.dtb
 
